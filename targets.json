@@ -1,1 +1,324 @@
-{}
+{
+  "updated": "2026-11-26T20:12:25.473079Z",
+  "targets": [
+    {
+      "repo": "reflex-dev/reflex",
+      "company": "Reflex",
+      "batch": "Winter 2023",
+      "team_size": 15,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/reflex",
+      "stars": 29051,
+      "language": "Python",
+      "contributors": 259
+    },
+    {
+      "repo": "reflex-dev/xy",
+      "company": "Reflex",
+      "batch": "Winter 2023",
+      "team_size": 15,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/reflex",
+      "stars": 1921,
+      "language": "Python",
+      "contributors": 20
+    },
+    {
+      "repo": "NangoHQ/nango",
+      "company": "Nango",
+      "batch": "Winter 2023",
+      "team_size": 6,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/nango",
+      "stars": 13333,
+      "language": "TypeScript",
+      "contributors": 272
+    },
+    {
+      "repo": "rivet-dev/agents",
+      "company": "Rivet",
+      "batch": "Winter 2023",
+      "team_size": 7,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/rivet",
+      "stars": 1658,
+      "language": "TypeScript",
+      "contributors": 16
+    },
+    {
+      "repo": "rivet-dev/dynamic-apps",
+      "company": "Rivet",
+      "batch": "Winter 2023",
+      "team_size": 7,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/rivet",
+      "stars": 1044,
+      "language": "TypeScript",
+      "contributors": 2
+    },
+    {
+      "repo": "rivet-dev/open-orange",
+      "company": "Rivet",
+      "batch": "Winter 2023",
+      "team_size": 7,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/rivet",
+      "stars": 876,
+      "language": "TypeScript",
+      "contributors": 6
+    },
+    {
+      "repo": "twentyhq/twenty",
+      "company": "Twenty",
+      "batch": "Summer 2023",
+      "team_size": 11,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/twenty",
+      "stars": 61511,
+      "language": "TypeScript",
+      "contributors": 465
+    },
+    {
+      "repo": "twentyhq/favicon",
+      "company": "Twenty",
+      "batch": "Summer 2023",
+      "team_size": 11,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/twenty",
+      "stars": 448,
+      "language": "TypeScript",
+      "contributors": 9
+    },
+    {
+      "repo": "Skyvern-AI/skyvern",
+      "company": "Skyvern",
+      "batch": "Summer 2023",
+      "team_size": 11,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/skyvern",
+      "stars": 23552,
+      "language": "Python",
+      "contributors": 92
+    },
+    {
+      "repo": "Skyvern-AI/rustwright",
+      "company": "Skyvern",
+      "batch": "Summer 2023",
+      "team_size": 11,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/skyvern",
+      "stars": 967,
+      "language": "Python",
+      "contributors": 9
+    },
+    {
+      "repo": "paradedb/django-paradedb",
+      "company": "ParadeDB",
+      "batch": "Summer 2023",
+      "team_size": 11,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/paradedb",
+      "stars": 77,
+      "language": "Python",
+      "contributors": 10
+    },
+    {
+      "repo": "TracecatHQ/tracecat",
+      "company": "Tracecat",
+      "batch": "Winter 2024",
+      "team_size": null,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/tracecat",
+      "stars": 3915,
+      "language": "Python",
+      "contributors": 49
+    },
+    {
+      "repo": "mem0ai/mem0",
+      "company": "Mem0",
+      "batch": "Summer 2024",
+      "team_size": 10,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/mem0",
+      "stars": 69509,
+      "language": "Python",
+      "contributors": 407
+    },
+    {
+      "repo": "unslothai/unsloth",
+      "company": "Unsloth AI",
+      "batch": "Summer 2024",
+      "team_size": 12,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/unsloth-ai",
+      "stars": 80303,
+      "language": "Python",
+      "contributors": 433
+    },
+    {
+      "repo": "unslothai/unsloth-zoo",
+      "company": "Unsloth AI",
+      "batch": "Summer 2024",
+      "team_size": 12,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/unsloth-ai",
+      "stars": 362,
+      "language": "Python",
+      "contributors": 135
+    },
+    {
+      "repo": "confident-ai/deepeval",
+      "company": "Confident AI",
+      "batch": "Winter 2025",
+      "team_size": 7,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/confident-ai",
+      "stars": 19689,
+      "language": "Python",
+      "contributors": 322
+    },
+    {
+      "repo": "confident-ai/deepteam",
+      "company": "Confident AI",
+      "batch": "Winter 2025",
+      "team_size": 7,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/confident-ai",
+      "stars": 3127,
+      "language": "Python",
+      "contributors": 35
+    },
+    {
+      "repo": "browser-use/browser-use",
+      "company": "Browser Use",
+      "batch": "Winter 2025",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/browser-use",
+      "stars": 122146,
+      "language": "Python",
+      "contributors": 361
+    },
+    {
+      "repo": "browser-use/jev-ultrafast",
+      "company": "Browser Use",
+      "batch": "Winter 2025",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/browser-use",
+      "stars": 24763,
+      "language": "Python",
+      "contributors": 1
+    },
+    {
+      "repo": "browser-use/browser-harness",
+      "company": "Browser Use",
+      "batch": "Winter 2025",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/browser-use",
+      "stars": 19260,
+      "language": "Python",
+      "contributors": 86
+    },
+    {
+      "repo": "trycua/hermes-cua-spaces",
+      "company": "Cua",
+      "batch": "Spring 2025",
+      "team_size": 3,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/cua",
+      "stars": 101,
+      "language": "Python",
+      "contributors": 3
+    },
+    {
+      "repo": "traceroot-ai/traceroot",
+      "company": "traceroot",
+      "batch": "Summer 2025",
+      "team_size": 4,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/traceroot",
+      "stars": 1477,
+      "language": "TypeScript",
+      "contributors": 95
+    },
+    {
+      "repo": "fosrl/pangolin",
+      "company": "Pangolin",
+      "batch": "Summer 2025",
+      "team_size": 3,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/pangolin",
+      "stars": 24000,
+      "language": "TypeScript",
+      "contributors": 126
+    },
+    {
+      "repo": "fosrl/newt",
+      "company": "Pangolin",
+      "batch": "Summer 2025",
+      "team_size": 3,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/pangolin",
+      "stars": 931,
+      "language": "Go",
+      "contributors": 31
+    },
+    {
+      "repo": "fosrl/gerbil",
+      "company": "Pangolin",
+      "batch": "Summer 2025",
+      "team_size": 3,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/pangolin",
+      "stars": 349,
+      "language": "Go",
+      "contributors": 9
+    },
+    {
+      "repo": "mcp-use/mcp-use",
+      "company": "Manufact",
+      "batch": "Summer 2025",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/manufact",
+      "stars": 11014,
+      "language": "TypeScript",
+      "contributors": 64
+    },
+    {
+      "repo": "mcp-use/mcp-use-cli",
+      "company": "Manufact",
+      "batch": "Summer 2025",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/manufact",
+      "stars": 53,
+      "language": "TypeScript",
+      "contributors": 4
+    },
+    {
+      "repo": "RunanywhereAI/trnrt",
+      "company": "RunAnywhere",
+      "batch": "Winter 2026",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/runanywhere",
+      "stars": 1662,
+      "language": "Python",
+      "contributors": 6
+    },
+    {
+      "repo": "RunanywhereAI/on-device-browser-agent",
+      "company": "RunAnywhere",
+      "batch": "Winter 2026",
+      "team_size": 5,
+      "hiring": true,
+      "yc_url": "https://www.ycombinator.com/companies/runanywhere",
+      "stars": 306,
+      "language": "TypeScript",
+      "contributors": 27
+    }
+  ]
+}
