@@ -102,6 +102,9 @@ CLAIMED_RE = re.compile(
 ATTEMPT_RE = re.compile(r"^\s*/(?:attempt|try)\b", re.I | re.M)
 
 
+NEAR_MISSES = []  # bounties écartées de peu (pour le mode test)
+
+
 class RateLimited(Exception):
     pass
 
@@ -285,7 +288,7 @@ def find_candidates(session, seen, hiring=frozenset()):
     issues = search_issues(session)
     log(f"{len(issues)} issues uniques trouvées.")
     now = datetime.now(timezone.utc)
-    ctx = {"repos": {}, "payers": {}}
+    ctx = {"repos": {}, "payers": {}, "near": []}
     stats = dict.fromkeys(["seen", "comments", "assigned", "excluded_repo", "no_money", "bot_trap",
                            "stars", "push", "not_funded", "too_small", "claimed", "competition",
                            "linked_pr", "no_history", "repo_err", "net_err"], 0)
@@ -298,7 +301,13 @@ def find_candidates(session, seen, hiring=frozenset()):
     for c in kept:
         c["score"] = score(c, now)
     kept.sort(key=lambda c: c["score"], reverse=True)
+    NEAR_MISSES[:] = ctx["near"]
     return kept
+
+
+def near(ctx, it, reason, amount=None, attempts=None):
+    ctx["near"].append({"url": it["html_url"], "reason": reason,
+                        "amount": amount, "attempts": attempts})
 
 
 def _filter_issues(session, issues, seen, now, ctx, stats, kept, hiring):
@@ -315,7 +324,10 @@ def _check_issue(session, it, seen, now, ctx, stats, kept, hiring):
     # 1. Filtres gratuits (données déjà présentes dans la recherche)
     if it["html_url"] in seen:
         stats["seen"] += 1; return
+    is_algora = any("💎" in (l.get("name") or "") for l in it.get("labels", []))
     if it.get("comments", 0) >= MAX_COMMENTS:
+        if is_algora:
+            near(ctx, it, f"{it['comments']} commentaires (max {MAX_COMMENTS - 1})")
         stats["comments"] += 1; return
     if it.get("assignees"):
         stats["assigned"] += 1; return
@@ -340,6 +352,8 @@ def _check_issue(session, it, seen, now, ctx, stats, kept, hiring):
         stats["repo_err"] += 1; return
     stars = repo.get("stargazers_count", 0)
     if not (MIN_STARS <= stars <= MAX_STARS):
+        if is_algora:
+            near(ctx, it, f"{stars} étoiles (hors {MIN_STARS}-{MAX_STARS})")
         stats["stars"] += 1; return
     pushed = repo.get("pushed_at")
     if not pushed or now - parse_dt(pushed) > MAX_PUSH_AGE:
@@ -349,16 +363,21 @@ def _check_issue(session, it, seen, now, ctx, stats, kept, hiring):
     info = analyze_comments(session, it)
     if not info["platform"]:
         stats["not_funded"] += 1; return
-    if info["amount"] < MIN_AMOUNT:
+    amt, n_att = info["amount"], len(info["attempters"])
+    if amt < MIN_AMOUNT:
+        near(ctx, it, f"montant < {MIN_AMOUNT} $", amt, n_att)
         stats["too_small"] += 1; return
     if info["claimed"]:
+        near(ctx, it, "déjà réclamée par une PR", amt, n_att)
         stats["claimed"] += 1; return
-    if len(info["attempters"]) > MAX_ATTEMPTS:
+    if n_att > MAX_ATTEMPTS:
+        near(ctx, it, f"{n_att} concurrents (max {MAX_ATTEMPTS})", amt, n_att)
         stats["competition"] += 1; return
 
     # 4. PR liée (1 appel)
     owner, name = repo["full_name"].split("/", 1)
     if has_linked_pr(session, owner, name, it["number"]):
+        near(ctx, it, "PR liée", amt, n_att)
         stats["linked_pr"] += 1; return
 
     # 5. Historique de paiement du financeur (1 recherche, en cache)
@@ -367,6 +386,7 @@ def _check_issue(session, it, seen, now, ctx, stats, kept, hiring):
         ctx["payers"][key] = payer_history(session, owner, info["platform"])
     paid_before = ctx["payers"][key]
     if REQUIRE_PAYER_HISTORY and paid_before == 0:
+        near(ctx, it, "financeur sans historique", amt, n_att)
         stats["no_history"] += 1; return
 
     company = info["company"] or repo.get("owner", {}).get("login", owner)
@@ -502,6 +522,17 @@ def save_seen(seen_list, path=SEEN_FILE):
     path.write_text(json.dumps(seen_list[-SEEN_MAX:], indent=2) + "\n", encoding="utf-8")
 
 
+def print_near_misses(limit=25):
+    if not NEAR_MISSES:
+        return
+    funded = sorted((n for n in NEAR_MISSES if n["amount"]), key=lambda n: -n["amount"])
+    other = [n for n in NEAR_MISSES if not n["amount"]]
+    print(f"\n--- Écartées de peu : {len(funded)} financée(s), {len(other)} 💎 Algora sans vérif. ---")
+    for n in (funded + other)[:limit]:
+        amt = fmt_amount(n["amount"]) if n["amount"] else "💎"
+        print(f"  {amt:>8}  {n['reason']:<38} {n['url']}")
+
+
 def print_report(items):
     print(f"\n=== {len(items)} bounty(s) retenue(s) ===")
     for c in items:
@@ -539,8 +570,13 @@ def main():
 
     seen_list = load_seen()
     session = make_session()
+    log(f"Réglages : LANGUAGES={','.join(LANGUAGES)} MIN_AMOUNT={MIN_AMOUNT} "
+        f"MAX_ATTEMPTS={MAX_ATTEMPTS} STARS={MIN_STARS}-{MAX_STARS} MAX_COMMENTS={MAX_COMMENTS} "
+        f"MAX_PUSH_DAYS={MAX_PUSH_AGE.days} REQUIRE_PAYER_HISTORY={int(REQUIRE_PAYER_HISTORY)}")
     items = find_candidates(session, set(seen_list), hiring)
     print_report(items)
+    if dry_run:
+        print_near_misses()
 
     if dry_run:
         log("\n[dry-run] aucune notification envoyée, seen_issues.json inchangé.")
