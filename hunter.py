@@ -129,20 +129,35 @@ def make_session():
 
 def gh_get(session, path, params=None):
     url = path if path.startswith("http") else f"{API}{path}"
-    for attempt in range(3):
-        r = session.get(url, params=params, timeout=30)
+    attempts = 4
+    for attempt in range(attempts):
+        last = attempt == attempts - 1
+        try:
+            r = session.get(url, params=params, timeout=30)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            # Coupure réseau passagère (ex. « Remote end closed connection ») : on réessaie.
+            if last:
+                raise
+            wait = 3 * (attempt + 1)
+            log(f"  coupure réseau ({type(e).__name__}), nouvel essai dans {wait}s…")
+            time.sleep(wait)
+            continue
         if r.status_code in (403, 429) and (
             r.headers.get("X-RateLimit-Remaining") == "0" or "rate limit" in r.text.lower()
         ):
             reset = int(r.headers.get("X-RateLimit-Reset", "0") or 0)
-            wait = max(0, reset - int(time.time())) + 1 if reset else int(r.headers.get("Retry-After", "60"))
-            if wait <= 65 and attempt < 2:
+            retry_after = r.headers.get("Retry-After")
+            if retry_after:  # limite « secondaire » : courte pause demandée
+                wait = int(retry_after) + 1
+            else:
+                wait = max(0, reset - int(time.time())) + 1 if reset else 60
+            if wait <= 65 and not last:
                 log(f"  rate limit, attente {wait}s…")
                 time.sleep(wait)
                 continue
             raise RateLimited(f"quota GitHub épuisé (reset dans {wait}s)")
-        if r.status_code >= 500 and attempt < 2:
-            time.sleep(2 * (attempt + 1))
+        if r.status_code >= 500 and not last:
+            time.sleep(3 * (attempt + 1))
             continue
         r.raise_for_status()
         return r.json()
@@ -273,7 +288,7 @@ def find_candidates(session, seen, hiring=frozenset()):
     ctx = {"repos": {}, "payers": {}}
     stats = dict.fromkeys(["seen", "comments", "assigned", "excluded_repo", "no_money", "bot_trap",
                            "stars", "push", "not_funded", "too_small", "claimed", "competition",
-                           "linked_pr", "no_history", "repo_err"], 0)
+                           "linked_pr", "no_history", "repo_err", "net_err"], 0)
     kept = []
     try:
         _filter_issues(session, issues, seen, now, ctx, stats, kept, hiring)
@@ -288,81 +303,90 @@ def find_candidates(session, seen, hiring=frozenset()):
 
 def _filter_issues(session, issues, seen, now, ctx, stats, kept, hiring):
     for it in issues:
-        # 1. Filtres gratuits (données déjà présentes dans la recherche)
-        if it["html_url"] in seen:
-            stats["seen"] += 1; continue
-        if it.get("comments", 0) >= MAX_COMMENTS:
-            stats["comments"] += 1; continue
-        if it.get("assignees"):
-            stats["assigned"] += 1; continue
-        repo_full = it["repository_url"].split("/repos/", 1)[1]
-        if repo_full.lower() in EXCLUDED_REPOS:
-            stats["excluded_repo"] += 1; continue
-        text = f"{it.get('title', '')}\n{it.get('body') or ''}"
-        if NO_MONEY_RE.search(text):
-            stats["no_money"] += 1; continue
-        if BOT_TRAP_RE.search(text):
-            stats["bot_trap"] += 1; continue
+        try:
+            _check_issue(session, it, seen, now, ctx, stats, kept, hiring)
+        except requests.RequestException as e:
+            # Une issue en erreur réseau est ignorée ; elle sera revue au prochain passage.
+            stats["net_err"] += 1
+            log(f"  erreur réseau sur {it['html_url']} ({type(e).__name__}), ignorée")
 
-        # 2. Dépôt (1 appel, mis en cache)
-        repo_url = it["repository_url"]
-        if repo_url not in ctx["repos"]:
-            try:
-                ctx["repos"][repo_url] = gh_get(session, repo_url)
-            except requests.HTTPError:
-                ctx["repos"][repo_url] = None
-        repo = ctx["repos"][repo_url]
-        if repo is None:
-            stats["repo_err"] += 1; continue
-        stars = repo.get("stargazers_count", 0)
-        if not (MIN_STARS <= stars <= MAX_STARS):
-            stats["stars"] += 1; continue
-        pushed = repo.get("pushed_at")
-        if not pushed or now - parse_dt(pushed) > MAX_PUSH_AGE:
-            stats["push"] += 1; continue
 
-        # 3. Commentaires : financement réel + concurrence (1 appel)
-        info = analyze_comments(session, it)
-        if not info["platform"]:
-            stats["not_funded"] += 1; continue
-        if info["amount"] < MIN_AMOUNT:
-            stats["too_small"] += 1; continue
-        if info["claimed"]:
-            stats["claimed"] += 1; continue
-        if len(info["attempters"]) > MAX_ATTEMPTS:
-            stats["competition"] += 1; continue
+def _check_issue(session, it, seen, now, ctx, stats, kept, hiring):
+    # 1. Filtres gratuits (données déjà présentes dans la recherche)
+    if it["html_url"] in seen:
+        stats["seen"] += 1; return
+    if it.get("comments", 0) >= MAX_COMMENTS:
+        stats["comments"] += 1; return
+    if it.get("assignees"):
+        stats["assigned"] += 1; return
+    repo_full = it["repository_url"].split("/repos/", 1)[1]
+    if repo_full.lower() in EXCLUDED_REPOS:
+        stats["excluded_repo"] += 1; return
+    text = f"{it.get('title', '')}\n{it.get('body') or ''}"
+    if NO_MONEY_RE.search(text):
+        stats["no_money"] += 1; return
+    if BOT_TRAP_RE.search(text):
+        stats["bot_trap"] += 1; return
 
-        # 4. PR liée (1 appel)
-        owner, name = repo["full_name"].split("/", 1)
-        if has_linked_pr(session, owner, name, it["number"]):
-            stats["linked_pr"] += 1; continue
+    # 2. Dépôt (1 appel, mis en cache)
+    repo_url = it["repository_url"]
+    if repo_url not in ctx["repos"]:
+        try:
+            ctx["repos"][repo_url] = gh_get(session, repo_url)
+        except requests.HTTPError:
+            ctx["repos"][repo_url] = None
+    repo = ctx["repos"][repo_url]
+    if repo is None:
+        stats["repo_err"] += 1; return
+    stars = repo.get("stargazers_count", 0)
+    if not (MIN_STARS <= stars <= MAX_STARS):
+        stats["stars"] += 1; return
+    pushed = repo.get("pushed_at")
+    if not pushed or now - parse_dt(pushed) > MAX_PUSH_AGE:
+        stats["push"] += 1; return
 
-        # 5. Historique de paiement du financeur (1 recherche, en cache)
-        key = (owner.lower(), info["platform"])
-        if key not in ctx["payers"]:
-            ctx["payers"][key] = payer_history(session, owner, info["platform"])
-        paid_before = ctx["payers"][key]
-        if REQUIRE_PAYER_HISTORY and paid_before == 0:
-            stats["no_history"] += 1; continue
+    # 3. Commentaires : financement réel + concurrence (1 appel)
+    info = analyze_comments(session, it)
+    if not info["platform"]:
+        stats["not_funded"] += 1; return
+    if info["amount"] < MIN_AMOUNT:
+        stats["too_small"] += 1; return
+    if info["claimed"]:
+        stats["claimed"] += 1; return
+    if len(info["attempters"]) > MAX_ATTEMPTS:
+        stats["competition"] += 1; return
 
-        company = info["company"] or repo.get("owner", {}).get("login", owner)
-        company_key = re.sub(r"\s*\(.*?\)", "", company).strip().lower()
-        kept.append({
-            "url": it["html_url"],
-            "title": it["title"],
-            "repo": repo["full_name"],
-            "repo_url": repo["html_url"],
-            "stars": stars,
-            "comments": it.get("comments", 0),
-            "created_at": it["created_at"],
-            "amount": info["amount"],
-            "platform": info["platform"],
-            "company": info["company"],
-            "attempts": len(info["attempters"]),
-            "paid_before": paid_before,
-            "hiring": company_key in hiring or owner.lower() in hiring,
-            "summary": summarize(it.get("body")),
-        })
+    # 4. PR liée (1 appel)
+    owner, name = repo["full_name"].split("/", 1)
+    if has_linked_pr(session, owner, name, it["number"]):
+        stats["linked_pr"] += 1; return
+
+    # 5. Historique de paiement du financeur (1 recherche, en cache)
+    key = (owner.lower(), info["platform"])
+    if key not in ctx["payers"]:
+        ctx["payers"][key] = payer_history(session, owner, info["platform"])
+    paid_before = ctx["payers"][key]
+    if REQUIRE_PAYER_HISTORY and paid_before == 0:
+        stats["no_history"] += 1; return
+
+    company = info["company"] or repo.get("owner", {}).get("login", owner)
+    company_key = re.sub(r"\s*\(.*?\)", "", company).strip().lower()
+    kept.append({
+        "url": it["html_url"],
+        "title": it["title"],
+        "repo": repo["full_name"],
+        "repo_url": repo["html_url"],
+        "stars": stars,
+        "comments": it.get("comments", 0),
+        "created_at": it["created_at"],
+        "amount": info["amount"],
+        "platform": info["platform"],
+        "company": info["company"],
+        "attempts": len(info["attempters"]),
+        "paid_before": paid_before,
+        "hiring": company_key in hiring or owner.lower() in hiring,
+        "summary": summarize(it.get("body")),
+    })
 
 
 # --------------------------------------------------------------------------- Notifications
