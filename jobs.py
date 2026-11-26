@@ -8,7 +8,9 @@ mot de JOB_KEYWORDS, puis les envoie sur Discord/Telegram (10 max par passage).
 Variables d'environnement :
   JOB_KEYWORDS                 défaut "python,django,fastapi,flask"
   JOB_REQUIRE                  défaut "remote"
-  DISCORD_JOBS_WEBHOOK_URL     salon dédié (sinon DISCORD_WEBHOOK_URL)
+  JOB_OPEN_ONLY                défaut 1 : seulement les offres ouvertes à l'international
+  JOBS_DAILY                   offres envoyées par jour, les meilleures (défaut 3)
+  DISCORD_JOBS_WEBHOOK_URL     salon dédié (obligatoire pour Discord)
   TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
 
 Usage :
@@ -28,8 +30,13 @@ import hunter
 
 ALGOLIA = "https://hn.algolia.com/api/v1"
 SEEN_FILE = Path(__file__).with_name("seen_jobs.json")
-MAX_NOTIFICATIONS = 10
+JOBS_DAILY = hunter.env_int("JOBS_DAILY", 3)
+OPEN_ONLY = (os.environ.get("JOB_OPEN_ONLY") or "1") == "1"
 SUMMARY_LEN = 350
+TOO_SENIOR_RE = re.compile(r"\b(?:staff|principal|director|vp|head of|cto|architect)\b", re.I)
+JUNIOR_RE = re.compile(r"\b(?:junior|mid[- ]?level|intermediate|new grad|entry[- ]level|any level)\b", re.I)
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+LINK_RE = re.compile(r"https?://[^\s<>()]+")
 
 
 def words(name, default):
@@ -111,9 +118,36 @@ def matches(text):
         return False
     if os.environ.get("JOB_ALLOW_US_ONLY") != "1" and accessibility(text) == 0:
         return False
+    if OPEN_ONLY and accessibility(text) != 2:
+        return False
+    header = text.split("\n", 1)[0]
+    if TOO_SENIOR_RE.search(header) and not JUNIOR_RE.search(header):
+        return False
     if not all(re.search(rf"\b{re.escape(w)}\b", low) for w in REQUIRE):
         return False
     return any(re.search(rf"\b{re.escape(w)}\b", low) for w in KEYWORDS)
+
+
+def job_score(text):
+    """Meilleure offre = ouverte au monde, Python dans l'intitulé, niveau accessible."""
+    header, low = text.split("\n", 1)[0], text.lower()
+    s = 20 if accessibility(text) == 2 else 0
+    s += 15 if any(re.search(rf"\b{re.escape(w)}\b", header.lower()) for w in KEYWORDS) else 0
+    s += 10 if JUNIOR_RE.search(text) else 0
+    s += 5 if re.search(r"\bcontract(?:or)?\b|\bfreelance\b", low) else 0
+    s += 5 if re.search(r"open[- ]source|github", low) else 0  # tes PR open source comptent
+    s -= 10 if re.search(r"\b(?:10|8|7)\+? years\b", low) else 0
+    return s
+
+
+def how_to_apply(text):
+    email = EMAIL_RE.search(text)
+    if email:
+        return f"Email : {email.group(0)}"
+    for link in LINK_RE.findall(text):
+        if re.search(r"jobs?|careers?|apply|hiring|lever\.co|greenhouse|ashbyhq|workable|forms?", link, re.I):
+            return f"Lien : {link}"
+    return "Voir l'offre complète sur HN (lien du titre)"
 
 
 def find_jobs(seen):
@@ -138,8 +172,10 @@ def find_jobs(seen):
             "summary": summary or "(voir l'offre)",
             "created_at": p.get("created_at", ""),
             "open": accessibility(text) == 2,
+            "apply": how_to_apply(text),
+            "score": job_score(text),
         })
-    jobs.sort(key=lambda j: j["open"], reverse=True)  # ouvertes à l'international d'abord
+    jobs.sort(key=lambda j: j["score"], reverse=True)
     hunter.log(f"{len(jobs)} nouvelle(s) offre(s) correspondante(s).")
     return jobs
 
@@ -150,7 +186,16 @@ def discord_payload(j):
                    + (" · 🌍 ouverte à l'international" if j["open"] else ""),
         "embeds": [{"title": j["header"], "url": j["url"],
                     "description": j["summary"][:4000], "color": 0x3498DB,
-                    "footer": {"text": "Source : Hacker News · Who is hiring"}}],
+                    "fields": [
+                        {"name": "✅ Déjà vérifié pour toi", "value":
+                         "• Télétravail ouvert à l'international (pas réservé aux US)\n"
+                         "• Python dans l'offre, pas un poste de direction\n"
+                         "• Publiée ce mois-ci sur HN Who is hiring", "inline": False},
+                        {"name": "👉 Postuler maintenant", "value":
+                         f"{j['apply']}\nMessage court en anglais : 2 lignes sur toi + "
+                         "lien vers tes PR open source + ton GitHub.", "inline": False},
+                    ],
+                    "footer": {"text": f"Score {j['score']} · Source : Hacker News · Who is hiring"}}],
     }
 
 
@@ -171,7 +216,7 @@ def main():
     jobs = find_jobs(set(seen_list))
     print(f"\n=== {len(jobs)} offre(s) ===")
     for j in jobs:
-        print(f"\n• {j['header']}\n  {j['url']}")
+        print(f"\n• [{j['score']}] {j['header']}\n  {j['url']}\n  {j['apply']}")
 
     if args.dry_run or os.environ.get("DRY_RUN") == "1":
         hunter.log("\n[dry-run] aucune notification envoyée, seen_jobs.json inchangé.")
@@ -180,9 +225,13 @@ def main():
         hunter.save_seen(seen_list + [j["url"] for j in jobs], SEEN_FILE)
         hunter.log(f"\n[seed] {len(jobs)} offre(s) marquée(s) comme vues.")
         return 0
-    if jobs:
-        webhook = os.environ.get("DISCORD_JOBS_WEBHOOK_URL", "").strip() or None
-        sent = hunter.send_notifications(jobs[:MAX_NOTIFICATIONS], discord_payload, telegram_text, webhook)
+    left = hunter.quota_left("jobs", JOBS_DAILY)
+    if jobs and not left:
+        hunter.log(f"Quota du jour atteint ({JOBS_DAILY}) : les suivantes attendront demain.")
+    if jobs and left:
+        sent = hunter.send_notifications(jobs[:left], discord_payload, telegram_text,
+                                         "DISCORD_JOBS_WEBHOOK_URL")
+        hunter.quota_use("jobs", len(sent))
         if sent:
             hunter.save_seen(seen_list + [j["url"] for j in sent], SEEN_FILE)
     return 0

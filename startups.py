@@ -20,7 +20,12 @@ Variables d'environnement (en plus de celles de hunter.py) :
   MAX_TEAM_SIZE                 défaut 60
   REQUIRE_HIRING                défaut 1 (0 = aussi les startups qui ne recrutent pas)
   ISSUE_MAX_AGE_HOURS           défaut 72
-  DISCORD_STARTUPS_WEBHOOK_URL  salon dédié (sinon DISCORD_WEBHOOK_URL)
+  STARTUP_DAILY                 issues envoyées par jour, les meilleures (défaut 2)
+  DISCORD_STARTUPS_WEBHOOK_URL  salon dédié (obligatoire pour Discord)
+
+3. Contrôle « prête à démarrer » (seules celles qui passent tout sont envoyées) :
+   description claire, personne ne l'a réclamée en commentaire, aucune PR liée,
+   et le dépôt fusionne vraiment des PR de contributeurs externes.
 
 Usage :
   python startups.py [--dry-run | --seed] [--refresh]
@@ -57,13 +62,22 @@ REFRESH_EVERY = timedelta(days=7)
 MIN_REPO_STARS = 50
 MAX_REPOS_PER_ORG = 3
 MAX_ISSUE_COMMENTS = 3
-MAX_NOTIFICATIONS = 10
+STARTUP_DAILY = env_int("STARTUP_DAILY", 2)
+MIN_BODY_LEN = 120
+MIN_EXTERNAL_MERGES = 2
 
 GOOD_LABELS = re.compile(
     r"good[ -]?first[ -]?issue|help[ -]?wanted|\bbug\b|beginner|easy|first[ -]?timers|"
     r"contributions? welcome|up[ -]for[ -]grabs|community", re.I)
 BAD_LABELS = re.compile(r"wontfix|won't fix|duplicate|invalid|question|discussion|stale|blocked", re.I)
 TEAM = {"OWNER", "MEMBER", "COLLABORATOR"}
+CLAIM_RE = re.compile(
+    r"\b(?:i'?d like to|i would like to|can i|could i|may i|let me|i'?ll|i will|i want to|i can)"
+    r" (?:work on|take|pick|tackle|handle|fix|try)\b|\bworking on (?:this|it)\b"
+    r"|\bassign (?:this|it|me)\b|\bi'?m on it\b|^\s*/(?:attempt|try|assign)\b", re.I | re.M)
+TEAM_BUSY_RE = re.compile(
+    r"\b(?:already|we'?re|we are|i'?m|i am) (?:working on|fixing|on) (?:this|it)\b"
+    r"|\binternal(?:ly)?\b|\bnot (?:accepting|open to) (?:prs?|contributions)", re.I)
 
 
 # --------------------------------------------------------------------------- Découverte
@@ -238,14 +252,50 @@ def new_issues(session, target, seen):
             "comments": it.get("comments", 0),
             "created_at": it["created_at"],
             "summary": hunter.summarize(it.get("body")),
+            "body": it.get("body") or "",
             **{k: target.get(k) for k in ("repo", "company", "batch", "team_size", "hiring",
                                           "yc_url", "stars", "contributors")},
         })
     return found
 
 
+def external_merges(session, repo, cache):
+    """PR de contributeurs externes fusionnées parmi les 30 dernières PR fermées."""
+    if repo not in cache:
+        prs = gh_get(session, f"/repos/{repo}/pulls",
+                     {"state": "closed", "sort": "updated", "direction": "desc", "per_page": 30})
+        cache[repo] = sum(1 for p in prs if p.get("merged_at")
+                          and p.get("author_association") not in TEAM
+                          and (p.get("user") or {}).get("type") != "Bot")
+    return cache[repo]
+
+
+def ready_check(session, i, cache):
+    """None si l'issue est prête à démarrer, sinon la raison du refus."""
+    if len((i["body"] or "").strip()) < MIN_BODY_LEN:
+        return "description trop vague"
+    if i["comments"]:
+        comments = gh_get(session, f"/repos/{i['repo']}/issues/{i['number']}/comments", {"per_page": 30})
+        for c in comments:
+            body = c.get("body") or ""
+            if c.get("author_association") in TEAM:
+                if TEAM_BUSY_RE.search(body):
+                    return "l'équipe s'en occupe"
+            elif (c.get("user") or {}).get("type") != "Bot" and CLAIM_RE.search(body):
+                return "déjà réclamée par quelqu'un"
+    owner, name = i["repo"].split("/", 1)
+    if hunter.has_linked_pr(session, owner, name, i["number"]):
+        return "PR déjà liée"
+    i["ext_merges"] = external_merges(session, i["repo"], cache)
+    if i["ext_merges"] < MIN_EXTERNAL_MERGES:
+        return "dépôt qui fusionne peu de PR externes"
+    if not i["good_label"] and i["ext_merges"] < 2 * MIN_EXTERNAL_MERGES:
+        return "pas de label d'appel à contribution"
+    return None
+
+
 def score(i):
-    s = 0
+    s = min(i.get("ext_merges", 0), 15)
     s += 15 if i["good_label"] and re.search(r"first|beginner|easy", i["good_label"], re.I) else 0
     s += 10 if i["good_label"] else 0
     s += 10 if i["by_team"] else 0
@@ -283,7 +333,16 @@ def discord_payload(i):
     if i["by_team"]:
         why.append("ouverte par l'équipe")
     fields.append({"name": "🎯 Pourquoi", "value": ", ".join(why), "inline": False})
-    fields.append({"name": "👉 À faire", "value": "Commente ton plan AVANT de coder, puis une PR petite et testée.",
+    fields.append({"name": "✅ Déjà vérifié pour toi", "value": "\n".join([
+        "• Description claire, issue de moins de 3 jours",
+        "• Personne ne l'a réclamée, aucune PR liée, non assignée",
+        f"• L'équipe fusionne les PR externes ({i.get('ext_merges', 0)} sur ses 30 dernières PR)",
+        "• Startup jeune et petite" + (" qui recrute" if i["hiring"] else ""),
+    ]), "inline": False})
+    fields.append({"name": "👉 Démarrer maintenant", "value":
+                   "1. Commente en anglais : « Hi! I'd like to work on this. My plan: … » (2-3 lignes).\n"
+                   "2. Attends un 👍 ou une réponse de l'équipe (souvent moins de 24 h), puis code.\n"
+                   f"3. PR petite et testée, avec « Fixes #{i['number']} » dans la description.",
                    "inline": False})
     return {
         "content": f"🎯 **Nouvelle issue chez {who(i)}**" + (" · 🧑‍💼 recrute" if i["hiring"] else ""),
@@ -326,11 +385,28 @@ def main():
             break
         except requests.RequestException as e:
             log(f"  {t['repo']} : ignoré ({type(e).__name__})")
+    log(f"{len(issues)} issue(s) candidate(s) : contrôle « prête à démarrer »…")
+    ready, cache, refused = [], {}, {}
+    for i in issues:
+        try:
+            reason = ready_check(session, i, cache)
+        except hunter.RateLimited as e:
+            log(f"⚠ {e} : arrêt anticipé.")
+            break
+        except requests.RequestException as e:
+            reason = f"erreur réseau ({type(e).__name__})"
+        if reason:
+            refused[reason] = refused.get(reason, 0) + 1
+        else:
+            ready.append(i)
+    if refused:
+        log("Écartées : " + ", ".join(f"{k}={v}" for k, v in refused.items()))
+    issues = ready
     for i in issues:
         i["score"] = score(i)
     issues.sort(key=lambda i: i["score"], reverse=True)
 
-    print(f"\n=== {len(issues)} nouvelle(s) issue(s) chez les startups cibles ===")
+    print(f"\n=== {len(issues)} issue(s) prête(s) à démarrer ===")
     for i in issues:
         print(f"\n• [{i['score']}] {who(i)} : {i['repo']} (🤝 {i['contributors'] or '?'})")
         print(f"  {i['title']}\n  {i['url']}")
@@ -342,9 +418,13 @@ def main():
         hunter.save_seen(seen_list + [i["url"] for i in issues], SEEN_FILE)
         log(f"\n[seed] {len(issues)} issue(s) marquée(s) comme vues.")
         return 0
-    if issues:
-        webhook = os.environ.get("DISCORD_STARTUPS_WEBHOOK_URL", "").strip() or None
-        sent = hunter.send_notifications(issues[:MAX_NOTIFICATIONS], discord_payload, telegram_text, webhook)
+    left = hunter.quota_left("startups", STARTUP_DAILY)
+    if issues and not left:
+        log(f"Quota du jour atteint ({STARTUP_DAILY}) : les suivantes attendront demain.")
+    if issues and left:
+        sent = hunter.send_notifications(issues[:left], discord_payload, telegram_text,
+                                         "DISCORD_STARTUPS_WEBHOOK_URL")
+        hunter.quota_use("startups", len(sent))
         if sent:
             hunter.save_seen(seen_list + [i["url"] for i in sent], SEEN_FILE)
     return 0

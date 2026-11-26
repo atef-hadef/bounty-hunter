@@ -15,7 +15,8 @@ Variables d'environnement :
   LANGUAGES                langages, séparés par des virgules (défaut : python)
   MIN_AMOUNT               montant minimum en $ (défaut : 50)
   MAX_ATTEMPTS             concurrents tolérés (défaut : 0)
-  REQUIRE_PAYER_HISTORY=1  n'accepter que les financeurs ayant déjà payé
+  REQUIRE_PAYER_HISTORY    1 (défaut) = seulement les financeurs ayant déjà payé
+  BOUNTY_DAILY             bounties envoyées par jour, les meilleures (défaut : 3)
   EXCLUDED_REPOS           "owner/repo,owner2/repo2" à ignorer
   MIN_STARS / MAX_STARS    étoiles du dépôt (défaut : 50 / 3000)
   MAX_COMMENTS             commentaires max, exclus (défaut : 8)
@@ -56,7 +57,7 @@ def env_int(name, default):
 LANGUAGES = [l.strip() for l in (os.environ.get("LANGUAGES") or "python").split(",") if l.strip()]
 MIN_AMOUNT = env_int("MIN_AMOUNT", 50)
 MAX_ATTEMPTS = env_int("MAX_ATTEMPTS", 0)
-REQUIRE_PAYER_HISTORY = os.environ.get("REQUIRE_PAYER_HISTORY") == "1"
+REQUIRE_PAYER_HISTORY = (os.environ.get("REQUIRE_PAYER_HISTORY") or "1") == "1"
 
 QUERY_TEMPLATES = [
     'is:issue is:open language:{lang} label:"💎 Bounty"',
@@ -70,7 +71,8 @@ MAX_COMMENTS = env_int("MAX_COMMENTS", 8)
 MIN_STARS, MAX_STARS = env_int("MIN_STARS", 50), env_int("MAX_STARS", 3000)
 MAX_PUSH_AGE = timedelta(days=env_int("MAX_PUSH_DAYS", 14))
 SUMMARY_LEN = 280
-MAX_NOTIFICATIONS = 10
+BOUNTY_DAILY = env_int("BOUNTY_DAILY", 3)
+QUOTA_FILE = Path(__file__).with_name("daily_quota.json")
 
 EXCLUDED_REPOS = {
     "ikalus1988/misakanet",
@@ -445,6 +447,23 @@ def competition_label(c):
     return "🟢 Aucun concurrent" if c["attempts"] == 0 else f"🟠 {c['attempts']} concurrent(s)"
 
 
+def checklist(c):
+    return "\n".join([
+        f"• Argent bloqué et confirmé par le bot {c['platform']} ({fmt_amount(c['amount'])})",
+        f"• Financeur fiable : {c['paid_before']} prime(s) déjà payée(s)" if c["paid_before"]
+        else "• Financeur sans historique connu",
+        "• Personne ne l'a réclamée : 0 /attempt, 0 PR liée, non assignée",
+        f"• Dépôt actif ({c['stars']} ⭐), {c['comments']} commentaire(s)",
+    ])
+
+
+def start_hint(c):
+    cmd = f"/attempt #{c['url'].rsplit('/', 1)[1]}" if c["platform"] == "Algora" else "/try"
+    return (f"1. Lis l'issue et vérifie que tu sais la faire en 1 à 3 jours.\n"
+            f"2. Commente `{cmd}` avec ton plan en 2 lignes (en anglais).\n"
+            f"3. Fork, code, teste, puis ouvre la PR avec « /claim #{c['url'].rsplit('/', 1)[1]} ».")
+
+
 def discord_payload(c):
     color = 0x2ECC71 if c["paid_before"] > 0 else 0xF1C40F
     fields = [
@@ -460,6 +479,8 @@ def discord_payload(c):
     if c["hiring"]:
         fields.append({"name": "🧑‍💼 Recrute", "value": "Cette entreprise recrute (HN Who is hiring) : "
                        "une bounty réussie est une excellente candidature.", "inline": False})
+    fields.append({"name": "✅ Déjà vérifié pour toi", "value": checklist(c), "inline": False})
+    fields.append({"name": "👉 Démarrer maintenant", "value": start_hint(c), "inline": False})
     return {
         "content": f"💰 **{fmt_amount(c['amount'])}** : nouvelle bounty",
         "embeds": [{"title": c["title"][:256], "url": c["url"],
@@ -481,18 +502,14 @@ def telegram_text(c):
     return "\n".join(lines)
 
 
-def channels():
-    return (os.environ.get("DISCORD_WEBHOOK_URL", "").strip(),
-            os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
-            os.environ.get("TELEGRAM_CHAT_ID", "").strip())
-
-
-def send_notifications(items, to_discord=discord_payload, to_telegram=telegram_text, webhook=None):
-    """Envoie les notifications ; renvoie les éléments effectivement notifiés."""
-    default_hook, tg_token, tg_chat = channels()
-    webhook = webhook or default_hook
+def send_notifications(items, to_discord=discord_payload, to_telegram=telegram_text,
+                       webhook_env="DISCORD_WEBHOOK_URL"):
+    """Envoie les notifications dans le salon propre à ce flux ; renvoie les éléments envoyés."""
+    webhook = os.environ.get(webhook_env, "").strip()
+    tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    tg_chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not webhook and not (tg_token and tg_chat):
-        log("⚠ Aucun canal configuré (Discord ou Telegram) : pas de notification.")
+        log(f"⚠ Secret {webhook_env} absent : rien n'est envoyé (chaque flux a son propre salon).")
         return []
     sent = []
     for item in items:
@@ -509,6 +526,31 @@ def send_notifications(items, to_discord=discord_payload, to_telegram=telegram_t
 
 
 # --------------------------------------------------------------------------- Main
+
+def _today():
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _load_quota():
+    try:
+        data = json.loads(QUOTA_FILE.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    return data if data.get("date") == _today() else {"date": _today(), "counts": {}}
+
+
+def quota_left(kind, limit):
+    """Places restantes aujourd'hui pour ce flux (seuls les meilleurs passent)."""
+    return max(0, limit - _load_quota()["counts"].get(kind, 0))
+
+
+def quota_use(kind, n):
+    if n <= 0:
+        return
+    data = _load_quota()
+    data["counts"][kind] = data["counts"].get(kind, 0) + n
+    QUOTA_FILE.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
 
 def load_seen(path=SEEN_FILE):
     try:
@@ -585,12 +627,12 @@ def main():
         save_seen(seen_list + [c["url"] for c in items])
         log(f"\n[seed] {len(items)} issue(s) marquée(s) comme vues, aucune notification envoyée.")
         return 0
-    if items:
-        batch = items[:MAX_NOTIFICATIONS]
-        if len(items) > MAX_NOTIFICATIONS:
-            log(f"Limite de {MAX_NOTIFICATIONS} notifications : "
-                f"{len(items) - MAX_NOTIFICATIONS} reportée(s) au prochain passage.")
-        sent = send_notifications(batch)
+    left = quota_left("bounties", BOUNTY_DAILY)
+    if items and not left:
+        log(f"Quota du jour atteint ({BOUNTY_DAILY}) : les suivantes attendront demain.")
+    if items and left:
+        sent = send_notifications(items[:left])
+        quota_use("bounties", len(sent))
         if sent:
             save_seen(seen_list + [c["url"] for c in sent])
     return 0

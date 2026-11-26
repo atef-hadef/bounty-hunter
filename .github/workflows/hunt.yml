@@ -50,18 +50,20 @@ jobs:
           MAX_STARS: ${{ vars.MAX_STARS }}
           MAX_COMMENTS: ${{ vars.MAX_COMMENTS }}
           MAX_PUSH_DAYS: ${{ vars.MAX_PUSH_DAYS }}
+          BOUNTY_DAILY: ${{ vars.BOUNTY_DAILY }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
         run: python hunter.py
 
       - name: Hunt startup jobs
         continue-on-error: true
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_JOBS_WEBHOOK_URL: ${{ secrets.DISCORD_JOBS_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           JOB_KEYWORDS: ${{ vars.JOB_KEYWORDS }}
           JOB_REQUIRE: ${{ vars.JOB_REQUIRE }}
+          JOB_OPEN_ONLY: ${{ vars.JOB_OPEN_ONLY }}
+          JOBS_DAILY: ${{ vars.JOBS_DAILY }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
         run: python jobs.py
 
@@ -69,7 +71,6 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_STARTUPS_WEBHOOK_URL: ${{ secrets.DISCORD_STARTUPS_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -78,12 +79,13 @@ jobs:
           MAX_TEAM_SIZE: ${{ vars.MAX_TEAM_SIZE }}
           REQUIRE_HIRING: ${{ vars.REQUIRE_HIRING }}
           ISSUE_MAX_AGE_HOURS: ${{ vars.ISSUE_MAX_AGE_HOURS }}
+          STARTUP_DAILY: ${{ vars.STARTUP_DAILY }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
         run: python startups.py
 
       - name: Commit state files if changed
         run: |
-          FILES="seen_issues.json seen_jobs.json seen_startup_issues.json targets.json"
+          FILES="seen_issues.json seen_jobs.json seen_startup_issues.json targets.json daily_quota.json"
           if [ -z "$(git status --porcelain -- $FILES)" ]; then
             echo "Rien de nouveau."
             exit 0
