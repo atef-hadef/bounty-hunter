@@ -1,0 +1,4 @@
+# Dépôts de startups à surveiller en plus de ceux trouvés automatiquement.
+# Un dépôt par ligne, au format owner/repo. Les lignes commençant par # sont ignorées.
+# Exemple :
+# posthog/posthog
