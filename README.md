@@ -30,7 +30,18 @@ Chaque annonce contient **« ✅ Déjà vérifié pour toi »** (ce que le syst�
 - **Dépôt public** + variable `FAST_SCHEDULE=1` : en plus, les issues startup sont vérifiées toutes les
   15 minutes. Les minutes sont illimitées pour un dépôt public.
 
-GitHub peut retarder un passage planifié de quelques minutes aux heures chargées. C'est normal.
+GitHub peut retarder un passage planifié, et sur certains comptes récents il ne le lance pas du tout.
+**Déclencheur de secours** : un service externe gratuit (cron-job.org) lance le workflow toutes les
+15 minutes avec `mode=auto` (passage complet dans le premier quart d'heure, issues startup seulement sinon) :
+
+- URL : `POST https://api.github.com/repos/atef-hadef/bounty-hunter/actions/workflows/hunt.yml/dispatches`
+- En-têtes : `Accept: application/vnd.github+json` et `Authorization: Bearer <token>`
+- Corps : `{"ref":"main","inputs":{"mode":"auto"}}`
+- Token : *fine-grained*, limité au dépôt `bounty-hunter`, permission **Actions : Read and write** uniquement.
+  Il n'est stocké que chez cron-job.org. À renouveler avant son expiration.
+
+Si les deux déclencheurs tournent à la même heure, ce n'est pas grave : les passages s'enchaînent
+et une annonce n'est jamais envoyée deux fois.
 
 ## Configuration (Settings → Secrets and variables → Actions)
 

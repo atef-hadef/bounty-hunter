@@ -15,6 +15,13 @@ on:
         description: "Test : afficher les résultats dans le log sans notifier"
         type: boolean
         default: false
+      mode:
+        # « auto » sert au déclencheur externe (cron-job.org, toutes les 15 min) :
+        # passage complet dans le premier quart d'heure, issues startup seulement sinon.
+        description: "full = tout, fast = issues startup seulement, auto = selon l'heure"
+        type: choice
+        options: [full, fast, auto]
+        default: full
 
 permissions:
   contents: write
@@ -43,11 +50,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Choose run type
+        id: plan
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          fast=false
+          [ "$SCHEDULE" = "$FAST_CRON" ] && fast=true
+          [ "$MODE" = "fast" ] && fast=true
+          [ "$MODE" = "auto" ] && [ $((10#$(date -u +%M))) -ge 15 ] && fast=true
+          echo "fast=$fast" >> "$GITHUB_OUTPUT"
+          echo "Passage rapide (issues startup seulement) : $fast"
+
       # Chaque flux est indépendant : si l'un plante, les autres tournent quand même
       # et le salon #statut reçoit une alerte.
       - name: Hunt bounties
         id: bounties
-        if: github.event.schedule != env.FAST_CRON
+        if: steps.plan.outputs.fast != 'true'
         continue-on-error: true
         timeout-minutes: 8
         env:
@@ -70,7 +90,7 @@ jobs:
 
       - name: Hunt startup jobs
         id: jobs
-        if: github.event.schedule != env.FAST_CRON
+        if: steps.plan.outputs.fast != 'true'
         continue-on-error: true
         timeout-minutes: 5
         env:
