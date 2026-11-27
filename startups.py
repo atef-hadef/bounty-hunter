@@ -97,7 +97,7 @@ def batch_year(batch):
 
 
 def yc_companies():
-    data = requests.get(YC_OSS_URL, timeout=60).json()
+    data = hunter.http_get_json(YC_OSS_URL, timeout=60)
     out = []
     for c in data:
         if (c.get("status") or "").lower() != "active":

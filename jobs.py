@@ -53,11 +53,10 @@ def latest_thread():
     """Renvoie (titre, liste des offres de premier niveau) du dernier fil « Who is hiring »."""
     if "thread" in _thread_cache:
         return _thread_cache["thread"]
-    hits = requests.get(f"{ALGOLIA}/search_by_date",
-                        params={"tags": "story,author_whoishiring", "hitsPerPage": 10},
-                        timeout=30).json()["hits"]
+    hits = hunter.http_get_json(f"{ALGOLIA}/search_by_date",
+                                {"tags": "story,author_whoishiring", "hitsPerPage": 10}, timeout=30)["hits"]
     story = next(h for h in hits if h["title"].lower().startswith("ask hn: who is hiring"))
-    item = requests.get(f"{ALGOLIA}/items/{story['objectID']}", timeout=90).json()
+    item = hunter.http_get_json(f"{ALGOLIA}/items/{story['objectID']}", timeout=90)
     posts = [c for c in item.get("children", []) if c.get("text")]
     _thread_cache["thread"] = (story["title"], posts)
     return _thread_cache["thread"]

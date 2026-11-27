@@ -115,6 +115,24 @@ def log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+def http_get_json(url, params=None, timeout=60, attempts=4):
+    """GET JSON hors GitHub (Algolia, YC) avec nouveaux essais sur coupure ou erreur 5xx."""
+    for attempt in range(attempts):
+        last = attempt == attempts - 1
+        try:
+            r = requests.get(url, params=params, timeout=timeout)
+            if r.status_code >= 500 and not last:
+                raise requests.HTTPError(f"{r.status_code}")
+            r.raise_for_status()
+            return r.json()
+        except (requests.ConnectionError, requests.Timeout, requests.HTTPError) as e:
+            if last:
+                raise
+            wait = 3 * (attempt + 1)
+            log(f"  {url.split('/')[2]} indisponible ({type(e).__name__}), nouvel essai dans {wait}s…")
+            time.sleep(wait)
+
+
 # --------------------------------------------------------------------------- GitHub
 
 def make_session():
@@ -536,7 +554,20 @@ def _load_quota():
         data = json.loads(QUOTA_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
-    return data if data.get("date") == _today() else {"date": _today(), "counts": {}}
+    history = data.get("history", {})
+    if data.get("date") == _today():
+        data.setdefault("counts", {})
+        data["history"] = history
+        return data
+    if data.get("date") and data.get("counts"):
+        history[data["date"]] = data["counts"]
+    return {"date": _today(), "counts": {}, "history": dict(sorted(history.items())[-14:])}
+
+
+def sent_on(day):
+    """Nombre d'annonces envoyées par flux ce jour-là (bilan quotidien)."""
+    data = _load_quota()
+    return data["counts"] if day == data["date"] else data["history"].get(day, {})
 
 
 def quota_left(kind, limit):

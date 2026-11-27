@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+    paths: ['**.py', 'requirements.txt', '.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Syntaxe
+        run: python -m py_compile hunter.py jobs.py startups.py status.py
+      - name: Tests hors ligne
+        run: python -m unittest discover -s tests -v
