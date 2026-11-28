@@ -1,7 +1,11 @@
 {
-  "date": "2026-11-27",
+  "date": "2026-11-28",
   "counts": {
     "startups": 2
   },
-  "history": {}
+  "history": {
+    "2026-11-27": {
+      "startups": 2
+    }
+  }
 }
